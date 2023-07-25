@@ -334,6 +334,8 @@ static int RunSvc( SaveSvcState *pState )
     int fd_out;
     int sigval;
     char *config = "@config User Settings\n\n";
+    ssize_t n;
+    ssize_t len;
 
     if ( pState != NULL )
     {
@@ -360,7 +362,12 @@ static int RunSvc( SaveSvcState *pState )
                 if ( fd_out != -1 )
                 {
                     /* write the file header */
-                    write( fd_out, config, strlen(config) );
+                    len = strlen(config);
+                    n = write( fd_out, config, len );
+                    if ( n != len )
+                    {
+                        fprintf( stderr, "Header output failed\n" );
+                    }
 
                     /* output all dirty variables */
                     (void)VARQUERY_Search( pState->hVarServer,

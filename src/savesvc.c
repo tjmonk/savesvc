@@ -157,6 +157,10 @@ int main(int argC, char *argV[])
         pState->hVarServer = VARSERVER_Open();
         if ( pState->hVarServer != NULL )
         {
+            /* set up the termination handler to clean up if
+               the server quits unexpectedly */
+            SetupTerminationHandler();
+
             /* Process Options */
             ProcessOptions( argC, argV, pState );
 
@@ -271,7 +275,6 @@ static int ProcessOptions( int argC,
                            SaveSvcState *pState )
 {
     int c;
-    int result = EINVAL;
     const char *options = "hvt:f:";
 
     if( ( pState != NULL ) &&
@@ -443,6 +446,11 @@ static void SetupTerminationHandler( void )
 static void TerminationHandler( int signum, siginfo_t *info, void *ptr )
 {
     syslog( LOG_ERR, "Abnormal termination of vars\n" );
+
+    /* signal number, context pointer and signal info are unused */
+    (void)signum;
+    (void)info;
+    (void)ptr;
 
     if ( pState != NULL )
     {

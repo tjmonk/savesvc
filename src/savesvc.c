@@ -85,6 +85,12 @@ typedef struct _savesvcState
     /*! verbose output flag */
     bool verbose;
 
+    /*! output file descriptor */
+    int fd;
+
+    /*! temporary output file name */
+    char tmpfile[BUFSIZ];
+
 } SaveSvcState;
 
 /*==============================================================================
@@ -97,6 +103,9 @@ static int ProcessOptions( int argC,
                            char *argV[],
                            SaveSvcState *pState );
 static int RunSvc( SaveSvcState *pState );
+static int InitConfig( SaveSvcState *pState );
+static int WriteConfig( SaveSvcState *pState );
+static int FinalizeConfig( SaveSvcState *pState );
 
 /*==============================================================================
        Definitions
@@ -152,6 +161,9 @@ int main(int argC, char *argV[])
 
         /* set the default trigger variable */
         pState->triggervar = DEFAULT_TRIGGER_VARIABLE;
+
+        /* clear the file descriptor */
+        pState->fd = -1;
 
         /* get a handle to the variable server for transition events */
         pState->hVarServer = VARSERVER_Open();
@@ -334,11 +346,7 @@ static int RunSvc( SaveSvcState *pState )
     int result = EINVAL;
     int sig;
     int fd;
-    int fd_out;
     int sigval;
-    char *config = "@config User Settings\n\n";
-    ssize_t n;
-    ssize_t len;
 
     if ( pState != NULL )
     {
@@ -360,37 +368,183 @@ static int RunSvc( SaveSvcState *pState )
                     printf("Saving all dirty variables\n");
                 }
 
-                /* open the output file */
-                fd_out = open( pState->filename, O_CREAT | O_WRONLY, 0644);
-                if ( fd_out != -1 )
+                /* Create the variable configuration file */
+                result = InitConfig( pState );
+                if ( result == EOK )
                 {
-                    /* write the file header */
-                    len = strlen(config);
-                    n = write( fd_out, config, len );
-                    if ( n != len )
+                    result = WriteConfig( pState );
+                    if ( result == EOK )
                     {
-                        fprintf( stderr, "Header output failed\n" );
+                        result = FinalizeConfig( pState );
                     }
-
-                    /* output all dirty variables */
-                    (void)VARQUERY_Search( pState->hVarServer,
-                                           QUERY_FLAGS | QUERY_SHOWVALUE,
-                                           NULL,
-                                           0,
-                                           VARFLAG_DIRTY,
-                                           fd_out );
-
-                    /* close the output file */
-                    close( fd_out );
                 }
-                else
+
+                if ( result != EOK )
                 {
                     fprintf( stderr,
-                             "Failed to open output file: %s\n",
+                             "Failed to create configuration file: %s\n",
                              pState->filename );
                 }
             }
         }
+    }
+
+    return result;
+}
+
+/*============================================================================*/
+/*  InitConfig                                                                */
+/*!
+    Initialize the configuration file
+
+    The InitConfig function creates and opens a new temporary file
+    for writing the dirty configuration data into.
+
+    if the file is successfully created, pState->fd is a handle to
+    the configuration file which was opened for writing
+
+    @param[in,out]
+        pState
+            pointer to the SaveSvc state which contains the config file name
+
+    @retval EOK - success
+    @retval EINVAL - invalid arguments
+    @retval other error from open()
+
+==============================================================================*/
+static int InitConfig( SaveSvcState *pState )
+{
+    int result = EINVAL;
+    int n;
+    int rc;
+
+    if ( ( pState != NULL ) &&
+         ( pState->filename != NULL ) )
+    {
+        /* create the temporary file name */
+        n = snprintf( pState->tmpfile,
+                      sizeof pState->tmpfile,
+                      "%s.%s",
+                      pState->filename,
+                      ".tmp" );
+        if ( n > 0 )
+        {
+            if ( (size_t)n < sizeof pState->tmpfile )
+            {
+                /* remove any previous file which may be left around */
+                rc = unlink( pState->tmpfile );
+                if ( rc == -1 )
+                {
+                    result = rc;
+                }
+
+                /* open the output file for creation/writing */
+                pState->fd = open( pState->tmpfile, O_CREAT | O_WRONLY, 0644 );
+                if ( pState->fd == -1 )
+                {
+                    /* an error occurred */
+                    result = errno;
+                }
+                else
+                {
+                    /* file was opened ok */
+                    result = EOK;
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+/*============================================================================*/
+/*  WriteConfig                                                               */
+/*!
+    Write data to the configuration file
+
+    The WriteConfig function iterates through all of the dirty configuration
+    variables and writes them to the configuration file as var=value pairs.
+
+    @param[in,out]
+        pState
+            pointer to the SaveSvc state which contains the config
+            file descriptor
+
+    @retval EOK - success
+    @retval EINVAL - invalid arguments
+    @retval other error from open()
+
+==============================================================================*/
+static int WriteConfig( SaveSvcState *pState )
+{
+    int result = EINVAL;
+    char *config = "@config User Settings\n\n";
+    ssize_t n;
+    ssize_t len;
+
+    if ( ( pState != NULL ) &&
+         ( pState->fd != -1 ) )
+    {
+        /* write the file header */
+        len = strlen(config);
+        n = write( pState->fd, config, len );
+        if ( n != len )
+        {
+            fprintf( stderr, "Header output failed\n" );
+        }
+        else
+        {
+            /* output all dirty variables */
+            (void)VARQUERY_Search( pState->hVarServer,
+                                QUERY_FLAGS | QUERY_SHOWVALUE,
+                                NULL,
+                                0,
+                                VARFLAG_DIRTY,
+                                pState->fd );
+        }
+
+        /* close the output file */
+        close( pState->fd );
+        pState->fd = -1;
+
+        result = EOK;
+    }
+
+    return result;
+}
+
+/*============================================================================*/
+/*  FinalizeConfig                                                            */
+/*!
+    Finalize the configuration file
+
+    The FinalizeConfig function moves the configuration data written
+    to the temporary file into the final configuration file via a
+    rename operation.  This ensures that there is never a time when
+    the configuration file does not exist (except for on first startup
+    when no configuration data has been saved)
+
+    @param[in]
+        pState
+            pointer to the SaveSvc state which contains the name of the
+            configuration file.
+
+    @retval EOK - success
+    @retval EINVAL - invalid arguments
+    @retval other error from rename()
+
+==============================================================================*/
+static int FinalizeConfig( SaveSvcState *pState )
+{
+    int result = EINVAL;
+    int rc;
+
+    if ( ( pState != NULL ) &&
+         ( pState->tmpfile != NULL ) &&
+         ( pState->filename != NULL ) )
+    {
+        rc = rename( pState->tmpfile, pState->filename );
+        result = ( rc == 0 ) ? EOK : errno;
     }
 
     return result;

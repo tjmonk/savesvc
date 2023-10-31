@@ -105,6 +105,7 @@ static int ProcessOptions( int argC,
 static int RunSvc( SaveSvcState *pState );
 static int InitConfig( SaveSvcState *pState );
 static int WriteConfig( SaveSvcState *pState );
+static int WriteConfigVars( SaveSvcState *pState );
 static int FinalizeConfig( SaveSvcState *pState );
 
 /*==============================================================================
@@ -495,12 +496,7 @@ static int WriteConfig( SaveSvcState *pState )
         else
         {
             /* output all dirty variables */
-            (void)VARQUERY_Search( pState->hVarServer,
-                                QUERY_FLAGS | QUERY_SHOWVALUE,
-                                NULL,
-                                0,
-                                VARFLAG_DIRTY,
-                                pState->fd );
+            result = WriteConfigVars( pState );
         }
 
         /* close the output file */
@@ -508,6 +504,88 @@ static int WriteConfig( SaveSvcState *pState )
         pState->fd = -1;
 
         result = EOK;
+    }
+
+    return result;
+}
+
+/*============================================================================*/
+/*  WriteConfigVars                                                           */
+/*!
+    Write dirty variables to the configuration file
+
+    The WriteConfigVars function iterates through all of the dirty configuration
+    variables and writes them to the configuration file as var=value pairs.
+
+    @param[in,out]
+        pState
+            pointer to the SaveSvc state which contains the config
+            file descriptor
+
+    @retval EOK - success
+    @retval EINVAL - invalid arguments
+
+==============================================================================*/
+static int WriteConfigVars( SaveSvcState *pState )
+{
+    int result = EINVAL;
+    char buf[BUFSIZ];
+    VarQuery query;
+    VarObject obj;
+    int rc;
+
+    if ( pState != NULL )
+    {
+        memset( &query, 0, sizeof( VarQuery ) );
+
+        query.type = QUERY_FLAGS;
+        query.flags = VARFLAG_DIRTY;
+
+        obj.val.str = buf;
+        obj.len = sizeof buf;
+
+        result = VAR_GetFirst( pState->hVarServer, &query, &obj );
+        while ( result == EOK )
+        {
+            if ( obj.type == VARTYPE_STR )
+            {
+                /* we already have a string object on the buffer */
+                rc = EOK;
+            }
+            else
+            {
+                /* convert non-string object to string */
+                rc = VAROBJECT_ToString( &obj, buf, sizeof buf);
+            }
+
+            if ( rc == EOK )
+            {
+                if ( query.instanceID == 0 )
+                {
+                    dprintf( pState->fd,
+                             "%s=%s\n",
+                             query.name,
+                             buf );
+                }
+                else
+                {
+                    dprintf( pState->fd,
+                             "[%d]%s=%s\n",
+                             query.instanceID,
+                             query.name,
+                             buf );
+                }
+            }
+            else
+            {
+                printf("cannot save %s: rc=%s\n", query.name, strerror(rc) );
+            }
+
+            obj.val.str = buf;
+            obj.len = sizeof buf;
+
+            result = VAR_GetNext( pState->hVarServer, &query, &obj );
+        }
     }
 
     return result;

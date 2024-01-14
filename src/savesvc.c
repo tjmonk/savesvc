@@ -354,7 +354,7 @@ static int RunSvc( SaveSvcState *pState )
         result = EOK;
 
         /* set up the signal file descriptor to receive notifications */
-        fd = VARSERVER_Signalfd();
+        fd = VARSERVER_Signalfd( 0 );
 
         while ( 1 )
         {

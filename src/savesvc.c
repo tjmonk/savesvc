@@ -215,9 +215,10 @@ int main(int argC, char *argV[])
             }
 
             /* close the variable server */
-            VARSERVER_Close( pState->hVarServer );
-            pState->hVarServer = NULL;
-
+            if ( VARSERVER_Close( pState->hVarServer ) == EOK )
+            {
+                pState->hVarServer = NULL;
+            }
         }
         else
         {
@@ -677,7 +678,7 @@ static void SetupTerminationHandler( void )
 ==============================================================================*/
 static void TerminationHandler( int signum, siginfo_t *info, void *ptr )
 {
-    syslog( LOG_ERR, "Abnormal termination of vars\n" );
+    syslog( LOG_ERR, "Abnormal termination of savesvc\n" );
 
     /* signal number, context pointer and signal info are unused */
     (void)signum;
@@ -688,8 +689,10 @@ static void TerminationHandler( int signum, siginfo_t *info, void *ptr )
     {
         if ( pState->hVarServer != NULL )
         {
-            VARSERVER_Close( pState->hVarServer );
-            pState->hVarServer = NULL;
+            if ( VARSERVER_Close( pState->hVarServer ) == EOK )
+            {
+                pState->hVarServer = NULL;
+            }
         }
 
         free( pState );

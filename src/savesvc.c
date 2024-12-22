@@ -619,7 +619,6 @@ static int FinalizeConfig( SaveSvcState *pState )
     int rc;
 
     if ( ( pState != NULL ) &&
-         ( pState->tmpfile != NULL ) &&
          ( pState->filename != NULL ) )
     {
         rc = rename( pState->tmpfile, pState->filename );
